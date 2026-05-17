@@ -1,0 +1,33 @@
+# fly.toml app configuration file generated for questlogic-ai on 2026-05-17T16:03:44-07:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'questlogic-ai'
+primary_region = 'iad'
+
+[build]
+
+[env]
+  ANTHROPIC_MODEL_CHEAP = 'claude-haiku-4-5-20251001'
+  ANTHROPIC_MODEL_CURRICULUM = 'claude-sonnet-4-6'
+  ANTHROPIC_MODEL_TUTOR = 'claude-sonnet-4-6'
+  PORT = '8080'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = 'requests'
+    hard_limit = 50
+    soft_limit = 25
+
+[[vm]]
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 512

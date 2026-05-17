@@ -1,0 +1,18 @@
+{
+  "name": "questlogic",
+  "private": true,
+  "version": "0.1.0",
+  "description": "QuestLogic AI — gamified, AI-native learning platform",
+  "scripts": {
+    "dev:web": "pnpm --filter @questlogic/web dev",
+    "dev:ai": "cd apps/ai && uvicorn questlogic_ai.main:app --reload --port 8000",
+    "build:web": "pnpm --filter @questlogic/web build",
+    "lint": "pnpm --filter @questlogic/web lint",
+    "migrate": "node --env-file=.env packages/db/migrate.mjs"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}
