@@ -59,14 +59,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
-  // Load prior message history.
-  const { data: prior } = await sb
+  // Load prior message history. Keep the window small (last ~3 user/assistant
+  // exchanges) so the tutor focuses on what just happened instead of building
+  // a recap of the whole session — recap behavior was a real bug before this
+  // was tightened.
+  const { data: priorReverse } = await sb
     .from("messages")
     .select("role, content")
     .eq("session_id", session.id)
     .is("deleted_at", null)
-    .order("created_at", { ascending: true })
-    .limit(20);
+    .order("created_at", { ascending: false })
+    .limit(6);
+  const prior = (priorReverse ?? []).slice().reverse();
 
   const history: ChatMessage[] = (prior ?? []).map((m) => ({
     role: m.role as ChatMessage["role"],
