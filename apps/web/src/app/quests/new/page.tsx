@@ -26,102 +26,146 @@ async function createQuestAction(formData: FormData): Promise<never> {
     .single();
   if (!subject) throw new Error("Unknown subject");
 
-  // 1. Ask the AI service to generate a curriculum template.
-  const ai = await generateCurriculum({
-    user_id: appUserId,
-    subject_slug: subjectSlug,
-    topic,
-    depth,
-  });
-
   const contentHash = await hash(`${subjectSlug}|${topic}|${depth}|v1`);
 
-  // 2. Insert curriculum_templates row.
-  const { data: template, error: tErr } = await sb
+  // Cache lookup: if we've already generated this template, reuse it. Saves an
+  // AI call and avoids a unique-constraint violation on (content_hash, version).
+  const { data: existingTemplate } = await sb
     .from("curriculum_templates")
-    .insert({
-      subject_id: subject.id,
+    .select("id")
+    .eq("content_hash", contentHash)
+    .eq("version", 1)
+    .maybeSingle();
+
+  let templateId: string;
+  let entryNodeIds: Set<string>;
+  let allNodeIds: string[];
+
+  if (existingTemplate) {
+    templateId = existingTemplate.id;
+    const { ids, entries } = await loadTemplateGraph(sb, templateId);
+    allNodeIds = ids;
+    entryNodeIds = entries;
+  } else {
+    // Cache miss — generate from the AI service and persist the whole template.
+    const ai = await generateCurriculum({
+      user_id: appUserId,
+      subject_slug: subjectSlug,
       topic,
       depth,
-      content_hash: contentHash,
-      version: 1,
-      status: "active",
-      generator_model: ai.model,
-      generated_by: appUserId,
-    })
-    .select("id")
-    .single();
-  if (tErr || !template) throw new Error(`Template insert: ${tErr?.message}`);
+    });
 
-  // 3. Insert template_nodes.
-  const nodeRows = ai.template.nodes.map((n, i) => ({
-    template_id: template.id,
-    slug: n.slug,
-    title: n.title,
-    summary: n.summary,
-    content: (n.content ?? {}) as Record<string, unknown>,
-    order_hint: i,
-    depth_level: n.prerequisites.length === 0 ? 0 : 1, // crude; refined when DAG layout pass added
-    estimated_minutes: n.estimated_minutes ?? null,
-  }));
-  const { data: insertedNodes, error: nErr } = await sb
-    .from("template_nodes")
-    .insert(nodeRows)
-    .select("id, slug");
-  if (nErr || !insertedNodes) throw new Error(`Nodes insert: ${nErr?.message}`);
+    const { data: template, error: tErr } = await sb
+      .from("curriculum_templates")
+      .insert({
+        subject_id: subject.id,
+        topic,
+        depth,
+        content_hash: contentHash,
+        version: 1,
+        status: "active",
+        generator_model: ai.model,
+        generated_by: appUserId,
+      })
+      .select("id")
+      .single();
+    if (tErr || !template) throw new Error(`Template insert: ${tErr?.message}`);
+    templateId = template.id;
 
-  const slugToId = new Map(insertedNodes.map((r) => [r.slug, r.id]));
+    const nodeRows = ai.template.nodes.map((n, i) => ({
+      template_id: templateId,
+      slug: n.slug,
+      title: n.title,
+      summary: n.summary,
+      content: (n.content ?? {}) as Record<string, unknown>,
+      order_hint: i,
+      depth_level: n.prerequisites.length === 0 ? 0 : 1,
+      estimated_minutes: n.estimated_minutes ?? null,
+    }));
+    const { data: insertedNodes, error: nErr } = await sb
+      .from("template_nodes")
+      .insert(nodeRows)
+      .select("id, slug");
+    if (nErr || !insertedNodes)
+      throw new Error(`Nodes insert: ${nErr?.message}`);
 
-  // 4. Insert edges.
-  const edgeRows: Array<{
-    template_id: string;
-    from_node_id: string;
-    to_node_id: string;
-  }> = [];
-  for (const n of ai.template.nodes) {
-    const toId = slugToId.get(n.slug);
-    if (!toId) continue;
-    for (const prereq of n.prerequisites) {
-      const fromId = slugToId.get(prereq);
-      if (!fromId || fromId === toId) continue;
-      edgeRows.push({
-        template_id: template.id,
-        from_node_id: fromId,
-        to_node_id: toId,
-      });
+    const slugToId = new Map(insertedNodes.map((r) => [r.slug, r.id]));
+
+    const edgeRows: Array<{
+      template_id: string;
+      from_node_id: string;
+      to_node_id: string;
+    }> = [];
+    for (const n of ai.template.nodes) {
+      const toId = slugToId.get(n.slug);
+      if (!toId) continue;
+      for (const prereq of n.prerequisites) {
+        const fromId = slugToId.get(prereq);
+        if (!fromId || fromId === toId) continue;
+        edgeRows.push({
+          template_id: templateId,
+          from_node_id: fromId,
+          to_node_id: toId,
+        });
+      }
     }
-  }
-  if (edgeRows.length > 0) {
-    const { error: eErr } = await sb.from("template_edges").insert(edgeRows);
-    if (eErr) throw new Error(`Edges insert: ${eErr.message}`);
+    if (edgeRows.length > 0) {
+      const { error: eErr } = await sb.from("template_edges").insert(edgeRows);
+      if (eErr) throw new Error(`Edges insert: ${eErr.message}`);
+    }
+
+    allNodeIds = insertedNodes.map((r) => r.id);
+    entryNodeIds = new Set(
+      ai.template.nodes
+        .filter((n) => n.prerequisites.length === 0)
+        .map((n) => slugToId.get(n.slug))
+        .filter((id): id is string => !!id),
+    );
   }
 
-  // 5. Insert quest row.
+  // Per-user quest row.
   const { data: quest, error: qErr } = await sb
     .from("quests")
     .insert({
       user_id: appUserId,
       subject_id: subject.id,
-      template_id: template.id,
+      template_id: templateId,
       title: topic,
     })
     .select("id")
     .single();
   if (qErr || !quest) throw new Error(`Quest insert: ${qErr?.message}`);
 
-  // 6. Initialize node_progress: entry nodes "available", others "locked".
-  const progressRows = ai.template.nodes.map((n) => {
-    const nodeId = slugToId.get(n.slug)!;
-    return {
-      quest_id: quest.id,
-      user_id: appUserId,
-      template_node_id: nodeId,
-      status: n.prerequisites.length === 0 ? "available" : "locked",
-    };
-  });
-  await sb.from("node_progress").insert(progressRows);
+  // Per-user progress rows. Entry nodes start "available"; everything else "locked".
+  const progressRows = allNodeIds.map((nodeId) => ({
+    quest_id: quest.id,
+    user_id: appUserId,
+    template_node_id: nodeId,
+    status: entryNodeIds.has(nodeId) ? "available" : "locked",
+  }));
+  const { error: pErr } = await sb.from("node_progress").insert(progressRows);
+  if (pErr) throw new Error(`Progress insert: ${pErr.message}`);
 
   redirect(`/quests/${quest.id}`);
+}
+
+async function loadTemplateGraph(
+  sb: ReturnType<typeof getAdminSupabase>,
+  templateId: string,
+): Promise<{ ids: string[]; entries: Set<string> }> {
+  const { data: nodes } = await sb
+    .from("template_nodes")
+    .select("id")
+    .eq("template_id", templateId);
+  const { data: edges } = await sb
+    .from("template_edges")
+    .select("to_node_id")
+    .eq("template_id", templateId);
+
+  const ids = (nodes ?? []).map((n) => n.id);
+  const withIncoming = new Set((edges ?? []).map((e) => e.to_node_id));
+  const entries = new Set(ids.filter((id) => !withIncoming.has(id)));
+  return { ids, entries };
 }
 
 async function hash(input: string): Promise<string> {
@@ -186,7 +230,8 @@ export default function NewQuestPage() {
           Generate quest
         </button>
         <p className="text-xs text-mute">
-          Generation takes ~10–20 seconds. Hang tight.
+          Generation takes ~10–20 seconds the first time. Repeat topics load
+          instantly.
         </p>
       </form>
     </main>
