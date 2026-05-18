@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ensureAppUser } from "@/lib/user";
 import { getAdminSupabase } from "@/utils/supabase/admin";
 import { generateCurriculum } from "@/lib/ai-client";
+import { SubmitButton } from "@/components/submit-button";
 import type { SubjectSlug, CurriculumDepth } from "@questlogic/shared";
 
 export const dynamic = "force-dynamic";
@@ -226,11 +227,12 @@ export default function NewQuestPage() {
           </select>
         </div>
 
-        <button type="submit" className="btn btn-primary justify-self-start">
-          Generate quest
-        </button>
-        <p className="text-xs text-mute">
-          Generation takes ~10–20 seconds the first time. Repeat topics load
+        <SubmitButton
+          idleLabel="Generate quest"
+          pendingLabel="Generating skill tree…"
+        />
+        <p className="text-xs text-mute ql-pulse">
+          First-time generation takes ~10–20 seconds. Repeat topics load
           instantly.
         </p>
       </form>

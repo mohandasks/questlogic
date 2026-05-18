@@ -53,3 +53,26 @@ a { color: inherit; }
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+
+/* Pure-CSS spinner — no library needed. Used by SubmitButton. */
+.ql-spinner {
+  border: 2px solid rgba(11, 11, 20, 0.25);
+  border-top-color: #0b0b14;
+  animation: ql-spin 700ms linear infinite;
+}
+
+@keyframes ql-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Subtle pulsing hint shown beneath the button during long server actions. */
+.ql-pulse {
+  animation: ql-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ql-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
