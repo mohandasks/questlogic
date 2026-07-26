@@ -38,7 +38,25 @@ SUBJECT_PEDAGOGY: dict[str, str] = {
 }
 
 
-def _build_system_prompt(*, subject_slug: str, node_title: str, node_summary: str) -> str:
+KICKOFF_BLOCK = (
+    "\n\nSESSION KICKOFF — READ THIS FIRST:\n"
+    "This is the very first turn of the session. The student has not sent a message yet — "
+    "there is nothing of theirs to engage with, so the 'engage with the student's literal "
+    "last message' rule below does not apply to this turn only.\n"
+    "Instead, for THIS turn:\n"
+    "- Open with a warm, concrete introduction to this node's topic (roughly 150–200 words): "
+    "  what it covers, why it matters, and one vivid concrete example or hook.\n"
+    "- Do not lecture beyond that one intro. Do not ask more than one question.\n"
+    "- End the turn by inviting the student in: either a light diagnostic question to gauge "
+    "  where they're starting from, or an open invitation to ask their own question.\n"
+    "- Starting with the student's NEXT message, resume full Socratic Q&A mode and follow all "
+    "  the rules below normally, including engaging with their literal last message.\n"
+)
+
+
+def _build_system_prompt(
+    *, subject_slug: str, node_title: str, node_summary: str, kickoff: bool = False
+) -> str:
     pedagogy = SUBJECT_PEDAGOGY.get(
         subject_slug, "Teach clearly, ask probing questions, never lecture for more than 4 lines without checking in."
     )
@@ -48,7 +66,8 @@ def _build_system_prompt(*, subject_slug: str, node_title: str, node_summary: st
         f"  Subject: {subject_slug}\n"
         f"  Node: {node_title}\n"
         f"  Goal: {node_summary}\n\n"
-        f"{pedagogy}\n\n"
+        f"{pedagogy}\n"
+        f"{KICKOFF_BLOCK if kickoff else ''}\n"
         "Response structure (THIS IS THE MOST IMPORTANT RULE):\n"
         "- Your FIRST sentence must engage with the literal content of the student's "
         "  most recent message. Not what they said two turns ago. Not a review of "
@@ -108,6 +127,7 @@ async def stream_tutor_reply(
     node_summary: str,
     history: list[dict[str, str]],
     new_message: str,
+    kickoff: bool = False,
 ) -> AsyncIterator[str]:
     client = get_client()
     # Sanitize history to user/assistant only (drop system rows if any leaked through).
@@ -116,11 +136,25 @@ async def stream_tutor_reply(
         for m in history
         if m["role"] in ("user", "assistant") and m["content"]
     ]
-    msgs.append({"role": "user", "content": new_message})
+    if kickoff:
+        # Claude's turn-taking requires a user turn to respond to. The student
+        # hasn't typed anything yet, so we synthesize one; it's never shown to
+        # or stored for the student — it just triggers the intro turn.
+        msgs.append(
+            {
+                "role": "user",
+                "content": "(Session start — I haven't said anything yet. Please begin the lesson.)",
+            }
+        )
+    else:
+        msgs.append({"role": "user", "content": new_message})
 
     req = CompletionRequest(
         system=_build_system_prompt(
-            subject_slug=subject_slug, node_title=node_title, node_summary=node_summary
+            subject_slug=subject_slug,
+            node_title=node_title,
+            node_summary=node_summary,
+            kickoff=kickoff,
         ),
         messages=msgs,
         tier=ModelTier.TUTOR_QUALITY,

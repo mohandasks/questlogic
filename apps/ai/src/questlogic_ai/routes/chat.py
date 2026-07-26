@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..auth import require_shared_secret
 from ..pipelines.tutor import stream_tutor_reply
@@ -26,7 +26,17 @@ class ChatStreamRequest(BaseModel):
     node_summary: str
     subject_slug: str = Field(pattern="^(history|economics|philosophy)$")
     history: list[ChatMessage] = Field(default_factory=list)
-    new_message: str = Field(min_length=1, max_length=4000)
+    new_message: str = Field(default="", max_length=4000)
+    # True for the synthetic first turn of a session: the student hasn't sent
+    # anything yet and the tutor should open with an intro. new_message is
+    # allowed to be empty in that case only.
+    kickoff: bool = False
+
+    @model_validator(mode="after")
+    def _require_message_unless_kickoff(self) -> "ChatStreamRequest":
+        if not self.kickoff and not self.new_message.strip():
+            raise ValueError("new_message must be non-empty unless kickoff is set")
+        return self
 
 
 @router.post("/stream")
@@ -45,6 +55,7 @@ async def post_stream(
                 node_summary=body.node_summary,
                 history=history,
                 new_message=body.new_message,
+                kickoff=body.kickoff,
             ):
                 yield chunk
         except Exception as e:  # noqa: BLE001

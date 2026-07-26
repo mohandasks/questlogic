@@ -95,6 +95,13 @@ export interface ChatStreamRequest {
   subject_slug: SubjectSlug;
   history: ChatMessage[];
   new_message: string;
+  /**
+   * True for the synthetic first turn of a node session, fired automatically
+   * when a student opens a node with no prior messages. Tells the tutor to
+   * lead with an introduction to the topic instead of waiting on the student.
+   * `new_message` is empty/ignored when this is set.
+   */
+  kickoff?: boolean;
 }
 
 export interface CurriculumGenerateRequest {

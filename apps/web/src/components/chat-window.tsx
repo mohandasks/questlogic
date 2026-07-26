@@ -26,6 +26,7 @@ export function ChatWindow({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const kickedOffRef = useRef(false);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -34,29 +35,45 @@ export function ChatWindow({
     });
   }, [history]);
 
-  async function send() {
-    const text = input.trim();
-    if (!text || streaming) return;
-    setInput("");
-    setStreaming(true);
+  // First time a student opens a node with no prior messages, have the tutor
+  // lead with an intro instead of sitting on a blank page waiting for them to
+  // type something. Guarded by a ref (not just initialHistory) so React
+  // strict-mode's double-invoke in dev can't fire it twice.
+  useEffect(() => {
+    if (initialHistory.length === 0 && !kickedOffRef.current) {
+      kickedOffRef.current = true;
+      void streamChat({
+        session_id: sessionId,
+        quest_id: questId,
+        node_id: nodeId,
+        node_title: nodeTitle,
+        node_summary: nodeSummary,
+        subject_slug: subjectSlug,
+        new_message: "",
+        kickoff: true,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    const userMsg: ChatMessage = { role: "user", content: text };
-    const next = [...history, userMsg, { role: "assistant", content: "" } as ChatMessage];
-    setHistory(next);
+  async function streamChat(payload: {
+    session_id: string;
+    quest_id: string;
+    node_id: string;
+    node_title: string;
+    node_summary: string;
+    subject_slug: string;
+    new_message: string;
+    kickoff?: boolean;
+  }) {
+    setStreaming(true);
+    setHistory((h) => [...h, { role: "assistant", content: "" } as ChatMessage]);
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          quest_id: questId,
-          node_id: nodeId,
-          node_title: nodeTitle,
-          node_summary: nodeSummary,
-          subject_slug: subjectSlug,
-          new_message: text,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok || !res.body) {
@@ -93,6 +110,23 @@ export function ChatWindow({
     }
   }
 
+  async function send() {
+    const text = input.trim();
+    if (!text || streaming) return;
+    setInput("");
+    setHistory((h) => [...h, { role: "user", content: text }]);
+
+    await streamChat({
+      session_id: sessionId,
+      quest_id: questId,
+      node_id: nodeId,
+      node_title: nodeTitle,
+      node_summary: nodeSummary,
+      subject_slug: subjectSlug,
+      new_message: text,
+    });
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -107,9 +141,7 @@ export function ChatWindow({
         className="panel min-h-0 flex-1 overflow-y-auto p-5"
       >
         {history.length === 0 && (
-          <p className="text-mute">
-            Ask a question, share what you already know, or just say "teach me."
-          </p>
+          <p className="text-mute">Loading your intro…</p>
         )}
         <div className="grid gap-4">
           {history.map((m, i) => (

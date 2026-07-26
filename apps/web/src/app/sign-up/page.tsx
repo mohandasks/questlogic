@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { getServerSupabase } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -14,12 +15,22 @@ async function signUpAction(formData: FormData) {
     redirect(`/sign-up?error=${encodeURIComponent("Password must be at least 8 characters.")}`);
   }
 
+  // Build the confirmation-link target explicitly rather than relying on the
+  // Supabase dashboard's "Site URL" setting, which is easy to leave pointed
+  // at the wrong environment (e.g. localhost) and silently breaks the link
+  // in the confirmation email.
+  const headersList = await headers();
+  const host = headersList.get("host");
+  const protocol = host?.startsWith("localhost") || host?.startsWith("127.0.0.1") ? "http" : "https";
+  const origin = `${protocol}://${host}`;
+
   const supabase = await getServerSupabase();
   const { error } = await supabase.auth.signUp({
     email,
     password,
     options: {
       data: { display_name: displayName || null },
+      emailRedirectTo: `${origin}/auth/callback`,
     },
   });
   if (error) {

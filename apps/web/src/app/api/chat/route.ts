@@ -15,13 +15,16 @@ interface Body {
   node_summary: string;
   subject_slug: SubjectSlug;
   new_message: string;
+  /** True for the automatic first turn of a node session (no student message yet). */
+  kickoff?: boolean;
 }
 
 export async function POST(req: Request) {
   const { appUserId } = await ensureAppUser();
   const body = (await req.json()) as Body;
+  const isKickoff = Boolean(body.kickoff);
 
-  if (!body.new_message || body.new_message.length > 4000) {
+  if (!isKickoff && (!body.new_message || body.new_message.length > 4000)) {
     return NextResponse.json(
       { error: "Message empty or too long" },
       { status: 400 },
@@ -78,13 +81,17 @@ export async function POST(req: Request) {
   }));
 
   // Persist the user message before calling the model. If the model fails, the
-  // user message still exists so the next turn picks up cleanly.
-  await sb.from("messages").insert({
-    session_id: session.id,
-    user_id: appUserId,
-    role: "user",
-    content: body.new_message,
-  });
+  // user message still exists so the next turn picks up cleanly. Kickoff turns
+  // have no real student message, so there's nothing to persist here — the
+  // assistant's intro is what gets saved once it streams back.
+  if (!isKickoff) {
+    await sb.from("messages").insert({
+      session_id: session.id,
+      user_id: appUserId,
+      role: "user",
+      content: body.new_message,
+    });
+  }
 
   // Call the AI service.
   const aiRes = await streamTutorChat({
@@ -96,7 +103,8 @@ export async function POST(req: Request) {
     node_summary: body.node_summary,
     subject_slug: body.subject_slug,
     history,
-    new_message: body.new_message,
+    new_message: isKickoff ? "" : body.new_message,
+    kickoff: isKickoff,
   });
 
   // Tee the stream: one copy to the browser, one to accumulate for persistence.
