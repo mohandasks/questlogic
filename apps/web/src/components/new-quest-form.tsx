@@ -66,6 +66,9 @@ export function NewQuestForm({
 
       <div>
         <label className="text-sm text-mute">Topic</label>
+        <p className="mt-1 text-xs text-mute">
+          Select any of the chips below, or type your own.
+        </p>
         <input
           name="topic"
           required
