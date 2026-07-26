@@ -115,9 +115,16 @@ export async function POST(req: Request) {
     async pull(controller) {
       const { value, done } = await reader.read();
       if (done) {
-        controller.close();
-        // Fire-and-forget persistence.
-        void persistAssistantMessage({
+        // Persist BEFORE closing. This used to be fire-and-forget, which let
+        // the client see the stream finish (and re-enable the input) before
+        // this turn's assistant message actually landed in `messages`. If the
+        // student replied fast enough, the *next* request's history query —
+        // which runs before this insert committed — would come back missing
+        // this turn's assistant reply entirely. The model would then ground
+        // itself on the last exchange it actually had, i.e. answer as though
+        // responding to an older message. Awaiting here makes each turn fully
+        // durable before the client can possibly fire the next one.
+        await persistAssistantMessage({
           sb,
           sessionId: session.id,
           userId: appUserId,
@@ -125,6 +132,7 @@ export async function POST(req: Request) {
           tokensInGuess: estimateTokens(body.new_message),
           tokensOutGuess: estimateTokens(assistantText),
         });
+        controller.close();
         return;
       }
       assistantText += new TextDecoder().decode(value);
