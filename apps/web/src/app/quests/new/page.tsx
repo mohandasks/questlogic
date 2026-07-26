@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ensureAppUser } from "@/lib/user";
 import { getAdminSupabase } from "@/utils/supabase/admin";
 import { generateCurriculum } from "@/lib/ai-client";
-import { SubmitButton } from "@/components/submit-button";
+import { NewQuestForm } from "@/components/new-quest-form";
 import type { SubjectSlug, CurriculumDepth } from "@questlogic/shared";
 
 export const dynamic = "force-dynamic";
@@ -189,53 +189,7 @@ export default function NewQuestPage() {
         for you to work through.
       </p>
 
-      <form action={createQuestAction} className="mt-8 grid gap-5">
-        <div>
-          <label className="text-sm text-mute">Subject</label>
-          <select
-            name="subject"
-            required
-            defaultValue="history"
-            className="mt-1 w-full rounded-lg border border-border bg-panel p-3"
-          >
-            <option value="history">History</option>
-            <option value="economics">Economics</option>
-            <option value="philosophy">Philosophy</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="text-sm text-mute">Topic</label>
-          <input
-            name="topic"
-            required
-            placeholder="e.g. The fall of the Roman Republic"
-            className="mt-1 w-full rounded-lg border border-border bg-panel p-3"
-          />
-        </div>
-
-        <div>
-          <label className="text-sm text-mute">Depth</label>
-          <select
-            name="depth"
-            defaultValue="intro"
-            className="mt-1 w-full rounded-lg border border-border bg-panel p-3"
-          >
-            <option value="intro">Intro</option>
-            <option value="intermediate">Intermediate</option>
-            <option value="advanced">Advanced</option>
-          </select>
-        </div>
-
-        <SubmitButton
-          idleLabel="Generate quest"
-          pendingLabel="Generating skill tree…"
-        />
-        <p className="text-xs text-mute ql-pulse">
-          First-time generation takes ~10–20 seconds. Repeat topics load
-          instantly.
-        </p>
-      </form>
+      <NewQuestForm action={createQuestAction} />
     </main>
   );
 }
