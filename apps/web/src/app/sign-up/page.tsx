@@ -55,7 +55,6 @@ export default async function SignUpPage({
         className="panel grid w-full max-w-sm gap-4 p-6"
       >
         <h1 className="text-2xl font-bold">Start your first quest</h1>
-        <p className="text-sm text-mute">QuestLogic is adults-only (18+) at launch.</p>
 
         {searchParams.error ? (
           <div className="rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
