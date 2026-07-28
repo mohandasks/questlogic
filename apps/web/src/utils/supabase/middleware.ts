@@ -8,8 +8,8 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
  * that require a signed-in user. Returns the modified response that the
  * middleware should send back.
  *
- * Public paths (landing, /sign-in, /sign-up, /auth/*) are allowed through
- * unauthenticated; everything else redirects to /sign-in.
+ * Public paths (landing, /sign-in, /sign-up, /auth/*, /share/*) are allowed
+ * through unauthenticated; everything else redirects to /sign-in.
  */
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
   let response = NextResponse.next({ request });
@@ -46,7 +46,8 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     path === "/" ||
     path.startsWith("/sign-in") ||
     path.startsWith("/sign-up") ||
-    path.startsWith("/auth/");
+    path.startsWith("/auth/") ||
+    path.startsWith("/share/");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

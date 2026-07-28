@@ -78,11 +78,20 @@ export default async function SharedSessionPage({
         )}
       </div>
 
-      <footer className="text-mute mt-6 text-center text-xs">
-        Shared from{" "}
-        <Link href="/" className="hover:text-ink underline">
-          QuestLogic
-        </Link>
+      <footer className="panel mt-6 flex flex-col items-center gap-3 p-5 text-center">
+        <p className="text-sm font-semibold">Want an AI tutor of your own?</p>
+        <p className="text-mute text-sm">
+          QuestLogic builds a personalized skill tree and tutors you through it,
+          one topic at a time — like the conversation above.
+        </p>
+        <div className="flex items-center gap-3">
+          <Link href="/sign-up" className="btn btn-primary">
+            Sign up free
+          </Link>
+          <Link href="/sign-in" className="text-accent text-sm hover:underline">
+            Log in
+          </Link>
+        </div>
       </footer>
     </main>
   );
