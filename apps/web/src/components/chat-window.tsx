@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage, SubjectSlug } from "@questlogic/shared";
+import { ChatBubble } from "./chat-bubble";
 
 interface Props {
   sessionId: string;
@@ -145,7 +146,7 @@ export function ChatWindow({
         )}
         <div className="grid gap-4">
           {history.map((m, i) => (
-            <Bubble key={i} msg={m} />
+            <ChatBubble key={i} msg={m} />
           ))}
         </div>
       </div>
@@ -168,21 +169,6 @@ export function ChatWindow({
           {streaming ? "…" : "Send"}
         </button>
       </div>
-    </div>
-  );
-}
-
-function Bubble({ msg }: { msg: ChatMessage }) {
-  const isUser = msg.role === "user";
-  return (
-    <div
-      className={`max-w-[85%] whitespace-pre-wrap rounded-2xl border px-4 py-3 text-sm leading-relaxed ${
-        isUser
-          ? "ml-auto border-accent/50 bg-accent/10"
-          : "mr-auto border-border bg-panel"
-      }`}
-    >
-      {msg.content || (isUser ? "" : "…")}
     </div>
   );
 }

@@ -294,12 +294,17 @@ CREATE TABLE sessions (
   summary_updated_at timestamptz,
   message_count    int NOT NULL DEFAULT 0,
   tokens_used      bigint NOT NULL DEFAULT 0,  -- cached aggregate
+  share_slug       text UNIQUE,                -- set when the student publishes a read-only link
+  shared_at        timestamptz,
   deleted_at       timestamptz
 );
 
 CREATE INDEX sessions_user_recent_idx ON sessions(user_id, started_at DESC);
 CREATE INDEX sessions_quest_idx ON sessions(quest_id);
+CREATE INDEX sessions_share_slug_idx ON sessions(share_slug) WHERE share_slug IS NOT NULL;
 ```
+
+Sharing is per-session, i.e. per sub-topic: a student can publish one node's tutoring chat (`/share/<slug>`) without exposing the rest of the quest. `share_slug` is a random URL-safe token, nulled out on unshare (0003_session_sharing.sql). The public route reads via the service-role client and only ever selects `user`/`assistant` messages.
 
 ### `messages` — chat turns
 

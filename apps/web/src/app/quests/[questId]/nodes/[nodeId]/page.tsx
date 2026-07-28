@@ -4,6 +4,7 @@ import { ensureAppUser } from "@/lib/user";
 import { getAdminSupabase } from "@/utils/supabase/admin";
 import { ChatWindow } from "@/components/chat-window";
 import { SubmitButton } from "@/components/submit-button";
+import { ShareChatButton } from "@/components/share-chat-button";
 import type { ChatMessage } from "@questlogic/shared";
 
 export const dynamic = "force-dynamic";
@@ -151,9 +152,10 @@ export default async function NodePage({
 
   // Find or create an active session for this (user, quest, node).
   let sessionId: string;
+  let shareSlug: string | null = null;
   const { data: existing } = await sb
     .from("sessions")
-    .select("id")
+    .select("id, share_slug")
     .eq("user_id", appUserId)
     .eq("quest_id", quest.id)
     .eq("current_node_id", node.id)
@@ -164,6 +166,7 @@ export default async function NodePage({
     .maybeSingle();
   if (existing) {
     sessionId = existing.id;
+    shareSlug = existing.share_slug;
   } else {
     const { data: created, error: cErr } = await sb
       .from("sessions")
@@ -216,6 +219,7 @@ export default async function NodePage({
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <span className="chip">{subject?.name ?? "Quest"}</span>
+          <ShareChatButton sessionId={sessionId} initialSlug={shareSlug} />
           {isMastered ? (
             <span className="chip" style={{ borderColor: "#5ce0a8", color: "#5ce0a8" }}>
               Mastered
