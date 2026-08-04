@@ -24,13 +24,20 @@ class ChatStreamRequest(BaseModel):
     node_id: str
     node_title: str
     node_summary: str
-    subject_slug: str = Field(pattern="^(history|economics|philosophy)$")
+    subject_slug: str = Field(pattern="^(history|economics|philosophy|curated)$")
     history: list[ChatMessage] = Field(default_factory=list)
     new_message: str = Field(default="", max_length=4000)
     # True for the synthetic first turn of a session: the student hasn't sent
     # anything yet and the tutor should open with an intro. new_message is
     # allowed to be empty in that case only.
     kickoff: bool = False
+    # Curated-course fields. Next.js resolves these from
+    # curriculum_templates.pedagogy_style / curated_lecture_sources /
+    # curated_assignments before calling this endpoint — the AI service stays
+    # stateless and never queries Postgres for content, only for telemetry.
+    pedagogy_style: str = Field(default="socratic", pattern="^(socratic|guided)$")
+    transcript: str | None = Field(default=None, max_length=200_000)
+    assignment_instructions: str | None = Field(default=None, max_length=20_000)
 
     @model_validator(mode="after")
     def _require_message_unless_kickoff(self) -> "ChatStreamRequest":
@@ -56,6 +63,9 @@ async def post_stream(
                 history=history,
                 new_message=body.new_message,
                 kickoff=body.kickoff,
+                pedagogy_style=body.pedagogy_style,  # type: ignore[arg-type]
+                transcript=body.transcript,
+                assignment_instructions=body.assignment_instructions,
             ):
                 yield chunk
         except Exception as e:  # noqa: BLE001

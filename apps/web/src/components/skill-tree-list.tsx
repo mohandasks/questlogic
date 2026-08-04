@@ -22,16 +22,23 @@ interface Edge {
  * v0 skill-tree renderer: ordered list grouped by reachability. The full
  * React Flow DAG view is a follow-up vertical slice — this layout reads well
  * for ~6–12 node trees and proves the underlying data.
+ *
+ * Reused for both generated quests (/quests/:id/nodes/:nodeId) and curated
+ * courses (/curated/:slug/lectures/:nodeId) — `linkBase` picks the route.
  */
 export function SkillTreeList({
   questId,
   nodes,
   edges,
+  linkBase,
 }: {
   questId: string;
   nodes: Node[];
   edges: Edge[];
+  /** Defaults to the generated-quest node route for backward compatibility. */
+  linkBase?: string;
 }) {
+  const base = linkBase ?? `/quests/${questId}/nodes`;
   // Group: entry points (no incoming edges) first, then by topological order
   // approximation via depth from any entry node.
   const incoming = new Map<string, number>();
@@ -83,7 +90,7 @@ export function SkillTreeList({
         return (
           <li key={n.id}>
             {clickable ? (
-              <Link href={`/quests/${questId}/nodes/${n.id}`}>{inner}</Link>
+              <Link href={`${base}/${n.id}`}>{inner}</Link>
             ) : (
               inner
             )}

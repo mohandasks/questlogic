@@ -1,22 +1,36 @@
-"""Tutor pipeline. Streams a response one node at a time, grounded in:
-- the node the student is working on,
-- the subject's pedagogy preferences,
-- the last N turns of the session.
+"""Tutor pipeline. Streams a response one node at a time.
 
-No tools, no retrieval in v0. Memory beyond the visible window is a follow-up
-slice that will read from user_memory_chunks.
+Two pedagogy styles, chosen per curriculum_templates.pedagogy_style:
+
+- "socratic" (default, generated quests): the model teaches from its own
+  knowledge, grounded only in the node title/summary the curriculum pipeline
+  invented. Ask-then-discover.
+- "guided" (curated courses): the model teaches from an actual lecture
+  transcript passed in by the caller, explain-then-check, and is instructed
+  to flag rather than fill in anything the transcript doesn't cover. See
+  QuestLogic_Curated_Subjects_Design.md for the full rationale.
+
+No tools, no retrieval in v0 beyond the transcript given for the current
+node. Memory beyond the visible window is a follow-up slice that will read
+from user_memory_chunks.
 """
 
 from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
+from typing import Literal
 
 from ..db import record_llm_call
-from ..llm import ModelTier, get_client
+from ..llm import CompletionUsage, ModelTier, SystemBlock, get_client
 from ..llm.client import CompletionRequest
-from ..llm.pricing import cost_micros
+from ..llm.pricing import cost_micros_detailed
 
+PedagogyStyle = Literal["socratic", "guided"]
+
+# ---------------------------------------------------------------------------
+# Socratic mode (generated quests) — unchanged from the original tutor prompt.
+# ---------------------------------------------------------------------------
 
 SUBJECT_PEDAGOGY: dict[str, str] = {
     "history": (
@@ -45,7 +59,7 @@ SUBJECT_PEDAGOGY: dict[str, str] = {
 }
 
 
-KICKOFF_BLOCK = (
+SOCRATIC_KICKOFF_BLOCK = (
     "\n\nSESSION KICKOFF — READ THIS FIRST:\n"
     "This is the very first turn of the session. The student has not sent a message yet — "
     "there is nothing of theirs to engage with, so the 'engage with the student's literal "
@@ -61,7 +75,7 @@ KICKOFF_BLOCK = (
 )
 
 
-def _build_system_prompt(
+def _build_socratic_system_prompt(
     *, subject_slug: str, node_title: str, node_summary: str, kickoff: bool = False
 ) -> str:
     pedagogy = SUBJECT_PEDAGOGY.get(
@@ -74,7 +88,7 @@ def _build_system_prompt(
         f"  Node: {node_title}\n"
         f"  Goal: {node_summary}\n\n"
         f"{pedagogy}\n"
-        f"{KICKOFF_BLOCK if kickoff else ''}\n"
+        f"{SOCRATIC_KICKOFF_BLOCK if kickoff else ''}\n"
         "Response structure (THIS IS THE MOST IMPORTANT RULE):\n"
         "- Your FIRST sentence must engage with the literal content of the student's "
         "  most recent message. Not what they said two turns ago. Not a review of "
@@ -144,6 +158,134 @@ def _build_system_prompt(
     )
 
 
+# ---------------------------------------------------------------------------
+# Guided mode (curated courses) — explain-then-check, grounded in a real
+# transcript. See QuestLogic_Curated_Subjects_Design.md §4.2 for the design
+# rationale behind each rule below.
+# ---------------------------------------------------------------------------
+
+GUIDED_KICKOFF_BLOCK = (
+    "\n\nSESSION KICKOFF — READ THIS FIRST:\n"
+    "This is the very first turn of the session; the student hasn't said anything yet.\n"
+    "For THIS turn only:\n"
+    "- Open by walking into the start of the lecture material below — a short, warm framing "
+    "  of what this lecture covers and why it matters (roughly 150–200 words), then begin "
+    "  actually teaching its first real idea.\n"
+    "- End the turn with a light comprehension check on that first idea, or an invitation to "
+    "  ask a question, before moving further into the material.\n"
+    "- Starting with the student's NEXT message, resume normal guided teaching per the rules "
+    "  below, including engaging with their literal last message.\n"
+)
+
+GUIDED_INSTRUCTIONS = """You are QuestLogic's tutor, teaching a specific lecture from a real
+course. The student is working through a single skill node:
+
+  Node: {node_title}
+  Goal: {node_summary}
+
+The lecture transcript for this node is provided below as SOURCE MATERIAL. This is a guided
+session, not a Socratic one — the job is to teach this specific lecture well, not to make the
+student discover it unaided.
+
+Grounding (THIS IS THE MOST IMPORTANT RULE):
+- Teach from the SOURCE MATERIAL. Do not introduce facts, frameworks, examples, or
+  terminology that aren't in it, unless the student explicitly asks you to go beyond the
+  lecture.
+- When you explain a concept, anchor it to the transcript ("as this lecture covers...",
+  "picking up where the lecture left off on X...") so the student can tell it's grounded.
+- If the student asks something the transcript doesn't cover, say so plainly and offer a
+  choice — e.g. "This lecture doesn't get into that. Want me to answer briefly from general
+  knowledge and flag it as outside the course material, or stay focused on what's here?" Never
+  silently blend outside knowledge into what should be a grounded answer.
+
+Teaching mode — explain, then check (not ask, then discover):
+- Default posture is direct instruction that follows the transcript's own sequence of ideas.
+  Walk the student through the lecture roughly in order rather than picking an arbitrary
+  thread.
+- After explaining a chunk of material, check understanding with something light — a quick
+  recall question, "does that follow?", or a short "what would you predict happens if..." —
+  rather than open-ended Socratic probing. The goal is confirmation, not discovery.
+- Still answer tangents the student raises, but return to the lecture's own thread afterward
+  rather than letting one question derail the whole session.
+- Aim for ~120–150 words per turn unless walking through something that genuinely needs more
+  room, or the student asks for depth.
+
+Signalling mastery:
+- The student has a 'Mark mastered' button in the page header. THEY click it; YOU suggest
+  when.
+- Suggest it once the student has been walked through the lecture's core content and shown
+  they can restate or apply its main idea in their own words — not before.
+- Do NOT make every turn end with a mastery prompt.
+
+Tone:
+- Do NOT use generic praise like 'Great!', 'Awesome!'. Praise only what was actually good,
+  and name what was good about it.
+- Avoid lists in your responses unless explaining literal steps from the material.
+- Never break character as a tutor.{kickoff_block}"""
+
+
+def _build_guided_system_blocks(
+    *,
+    node_title: str,
+    node_summary: str,
+    transcript: str | None,
+    assignment_instructions: str | None,
+    kickoff: bool,
+) -> list[SystemBlock]:
+    instructions = GUIDED_INSTRUCTIONS.format(
+        node_title=node_title,
+        node_summary=node_summary,
+        kickoff_block=GUIDED_KICKOFF_BLOCK if kickoff else "",
+    )
+    blocks = [SystemBlock(text=instructions)]
+
+    if transcript:
+        # This is the block worth caching: it's identical across every turn of
+        # a session on this node (and often large — a full lecture transcript
+        # can run 10-20K tokens). cache_control here caches everything up to
+        # and including this block, i.e. instructions + transcript together.
+        transcript_block = (
+            "\n\nSOURCE MATERIAL — this is the actual lecture transcript for this session. "
+            "Teach from this; do not introduce anything outside it unless asked.\n\n"
+            f"--- LECTURE TRANSCRIPT: {node_title} ---\n"
+            f"{transcript}\n"
+            "--- END TRANSCRIPT ---"
+        )
+        blocks.append(SystemBlock(text=transcript_block, cacheable=True))
+    else:
+        # Guided mode with no transcript ingested yet — teach from the node
+        # summary only, and say so, rather than silently degrading to
+        # free-generation the way Socratic mode would.
+        blocks.append(
+            SystemBlock(
+                text=(
+                    "\n\nNo transcript is on file for this lecture yet. Teach from this summary "
+                    f"only, and tell the student the full material isn't loaded: {node_summary}"
+                )
+            )
+        )
+
+    if assignment_instructions:
+        blocks.append(
+            SystemBlock(
+                text=(
+                    "\n\nThis lecture has an assignment the student may ask about. Help them "
+                    "work through it using the same grounding rules above — explain relevant "
+                    "material on request, but nudge toward the work rather than completing it "
+                    "for them.\n\n"
+                    f"--- ASSIGNMENT ---\n{assignment_instructions}\n--- END ASSIGNMENT ---"
+                )
+            )
+        )
+
+    return blocks
+
+
+# ---------------------------------------------------------------------------
+# Shared entry point
+# ---------------------------------------------------------------------------
+
+
 async def stream_tutor_reply(
     *,
     user_id: str,
@@ -154,6 +296,9 @@ async def stream_tutor_reply(
     history: list[dict[str, str]],
     new_message: str,
     kickoff: bool = False,
+    pedagogy_style: PedagogyStyle = "socratic",
+    transcript: str | None = None,
+    assignment_instructions: str | None = None,
 ) -> AsyncIterator[str]:
     client = get_client()
     # Sanitize history to user/assistant only (drop system rows if any leaked through).
@@ -175,13 +320,25 @@ async def stream_tutor_reply(
     else:
         msgs.append({"role": "user", "content": new_message})
 
-    req = CompletionRequest(
-        system=_build_system_prompt(
+    system: str | list[SystemBlock]
+    if pedagogy_style == "guided":
+        system = _build_guided_system_blocks(
+            node_title=node_title,
+            node_summary=node_summary,
+            transcript=transcript,
+            assignment_instructions=assignment_instructions,
+            kickoff=kickoff,
+        )
+    else:
+        system = _build_socratic_system_prompt(
             subject_slug=subject_slug,
             node_title=node_title,
             node_summary=node_summary,
             kickoff=kickoff,
-        ),
+        )
+
+    req = CompletionRequest(
+        system=system,
         messages=msgs,
         tier=ModelTier.TUTOR_QUALITY,
         max_tokens=900,
@@ -189,14 +346,12 @@ async def stream_tutor_reply(
     )
 
     t0 = time.monotonic()
-    streamed_chars = 0
-    tokens_in_estimate = sum(len(m["content"]) for m in msgs) // 4 + 200  # rough
     succeeded = True
     error_class: str | None = None
+    usage_holder: list[CompletionUsage] = []
 
     try:
-        async for chunk in client.stream(req):
-            streamed_chars += len(chunk)
+        async for chunk in client.stream(req, on_usage=usage_holder.append):
             yield chunk
     except Exception as e:  # noqa: BLE001
         succeeded = False
@@ -204,17 +359,31 @@ async def stream_tutor_reply(
         raise
     finally:
         latency_ms = int((time.monotonic() - t0) * 1000)
-        tokens_out_estimate = streamed_chars // 4
         model = client.model_for(ModelTier.TUTOR_QUALITY)
+        usage = usage_holder[0] if usage_holder else None
+        if usage is not None:
+            tokens_in, tokens_out = usage.tokens_in, usage.tokens_out
+            cost = cost_micros_detailed(
+                model,
+                tokens_in=usage.tokens_in,
+                tokens_out=usage.tokens_out,
+                cache_creation_tokens=usage.cache_creation_tokens,
+                cache_read_tokens=usage.cache_read_tokens,
+            )
+        else:
+            # Stream errored before Anthropic returned final usage (e.g. the
+            # request never made it out) — nothing real to report.
+            tokens_in = tokens_out = 0
+            cost = 0
         await record_llm_call(
             user_id=user_id,
             session_id=session_id,
             pipeline="tutor",
             model=model,
             provider="anthropic",
-            tokens_in=tokens_in_estimate,
-            tokens_out=tokens_out_estimate,
-            cost_micros=cost_micros(model, tokens_in_estimate, tokens_out_estimate),
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_micros=cost,
             latency_ms=latency_ms,
             succeeded=succeeded,
             error_class=error_class,

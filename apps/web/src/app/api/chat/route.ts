@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ensureAppUser } from "@/lib/user";
 import { getAdminSupabase } from "@/utils/supabase/admin";
 import { streamTutorChat } from "@/lib/ai-client";
-import type { ChatMessage, SubjectSlug } from "@questlogic/shared";
+import type { ChatMessage, PedagogyStyle, SubjectSlug } from "@questlogic/shared";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,6 +62,48 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
 
+  // Resolve teaching mode from the quest's template. Curated courses ground
+  // the tutor in the lecture transcript (+ assignment, if any) for the
+  // current node; the AI service never queries Postgres for this itself —
+  // it stays stateless with respect to course content. See
+  // QuestLogic_Curated_Subjects_Design.md §4.
+  let pedagogyStyle: PedagogyStyle = "socratic";
+  let transcript: string | null = null;
+  let assignmentInstructions: string | null = null;
+
+  const { data: quest } = await sb
+    .from("quests")
+    .select("template_id")
+    .eq("id", session.quest_id)
+    .single();
+
+  if (quest) {
+    const { data: template } = await sb
+      .from("curriculum_templates")
+      .select("pedagogy_style")
+      .eq("id", quest.template_id)
+      .single();
+
+    if (template?.pedagogy_style === "guided" && session.current_node_id) {
+      const { data: source } = await sb
+        .from("curated_lecture_sources")
+        .select("raw_text")
+        .eq("template_node_id", session.current_node_id)
+        .maybeSingle();
+      transcript = source?.raw_text ?? null;
+
+      const { data: assignment } = await sb
+        .from("curated_assignments")
+        .select("instructions")
+        .eq("template_node_id", session.current_node_id)
+        .limit(1)
+        .maybeSingle();
+      assignmentInstructions = assignment?.instructions ?? null;
+
+      pedagogyStyle = "guided";
+    }
+  }
+
   // Load prior message history. Keep the window small (last ~3 user/assistant
   // exchanges) so the tutor focuses on what just happened instead of building
   // a recap of the whole session — recap behavior was a real bug before this
@@ -105,6 +147,9 @@ export async function POST(req: Request) {
     history,
     new_message: isKickoff ? "" : body.new_message,
     kickoff: isKickoff,
+    pedagogy_style: pedagogyStyle,
+    transcript,
+    assignment_instructions: assignmentInstructions,
   });
 
   // Tee the stream: one copy to the browser, one to accumulate for persistence.

@@ -24,9 +24,14 @@ export default async function Landing() {
 
       <div className="mt-10 flex gap-3">
         {user ? (
-          <Link className="btn btn-primary" href="/dashboard">
-            Go to dashboard
-          </Link>
+          <>
+            <Link className="btn btn-primary" href="/dashboard">
+              Go to dashboard
+            </Link>
+            <Link className="btn" href="/curated">
+              Browse curated courses
+            </Link>
+          </>
         ) : (
           <>
             <Link className="btn btn-primary" href="/sign-up">

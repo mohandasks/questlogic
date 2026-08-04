@@ -46,9 +46,14 @@ export default async function DashboardPage() {
       <section className="mt-10">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">Your quests</h2>
-          <Link href="/quests/new" className="btn btn-primary">
-            Start a new quest
-          </Link>
+          <div className="flex gap-2">
+            <Link href="/curated" className="btn">
+              Curated
+            </Link>
+            <Link href="/quests/new" className="btn btn-primary">
+              Start a new quest
+            </Link>
+          </div>
         </div>
 
         <div className="mt-4 grid gap-3">

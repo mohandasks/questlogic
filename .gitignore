@@ -26,3 +26,12 @@ __pycache__
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# TS build cache
+*.tsbuildinfo
+
+# Curated-course staging: source PDFs used by `ingest-course` (often large
+# and/or copyrighted lecture material). Ingested content lives in Postgres
+# (and R2, if configured) once ingestion runs — these local files are just
+# input, not something the app or its deploys need.
+courses/

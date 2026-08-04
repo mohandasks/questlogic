@@ -1,6 +1,6 @@
 // Shared types. Mirrors the v1 schema. Keep aligned with QuestLogic_DB_Schema.md.
 
-export type SubjectSlug = "history" | "economics" | "philosophy";
+export type SubjectSlug = "history" | "economics" | "philosophy" | "curated";
 export type CurriculumDepth = "intro" | "intermediate" | "advanced";
 export type NodeStatus =
   | "locked"
@@ -11,6 +11,17 @@ export type NodeStatus =
 export type QuestStatus = "active" | "paused" | "completed" | "abandoned";
 export type MessageRole = "user" | "assistant" | "system" | "tool";
 export type Pipeline = "tutor" | "curriculum" | "grader" | "summary";
+
+/** Where a curriculum_templates row came from. */
+export type SourceType = "generated" | "curated";
+
+/**
+ * "socratic": ask-then-discover, the model invents both curriculum and
+ * teaching content (default for generated quests).
+ * "guided": explain-then-check, grounded in a real lecture transcript
+ * (curated courses). See QuestLogic_Curated_Subjects_Design.md §4.
+ */
+export type PedagogyStyle = "socratic" | "guided";
 
 export interface Subject {
   id: string;
@@ -102,6 +113,46 @@ export interface ChatStreamRequest {
    * `new_message` is empty/ignored when this is set.
    */
   kickoff?: boolean;
+  /**
+   * Curated-course fields. The browser never sets these — /api/chat/route.ts
+   * resolves them server-side from curriculum_templates/curated_lecture_sources/
+   * curated_assignments before calling the AI service, so the AI service stays
+   * stateless with respect to course content.
+   */
+  pedagogy_style?: PedagogyStyle;
+  transcript?: string | null;
+  assignment_instructions?: string | null;
+}
+
+/** Instructor/term/institution metadata for a curated course template.
+ * Stored in curriculum_templates.course_metadata (JSONB), not columns. */
+export interface CourseMetadata {
+  instructor?: string;
+  term?: string;
+  institution?: string;
+  course_code?: string;
+}
+
+/** One row of /curated — a published curated course. */
+export interface CuratedCourseSummary {
+  templateId: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  metadata: CourseMetadata;
+  lectureCount: number;
+}
+
+/** One lecture row within a curated course's week list. */
+export interface CuratedLectureSummary {
+  nodeId: string;
+  slug: string;
+  title: string;
+  summary: string;
+  weekNumber: number;
+  lectureNumber: number;
+  status: NodeStatus;
+  hasAssignment: boolean;
 }
 
 export interface CurriculumGenerateRequest {

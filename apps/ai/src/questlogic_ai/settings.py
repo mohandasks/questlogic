@@ -41,8 +41,21 @@ class Settings(BaseSettings):
         default="claude-haiku-4-5-20251001", alias="ANTHROPIC_MODEL_CHEAP"
     )
 
-    # Optional Postgres for llm_calls telemetry.
+    # Optional Postgres for llm_calls telemetry, and for the course-ingestion
+    # CLI (curated subjects) which writes curriculum_templates/template_nodes/
+    # curated_lecture_sources directly. Required for `ingest-course` to work;
+    # optional (and no-op) for the FastAPI service itself.
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
+
+    # Optional Cloudflare R2 (S3-compatible) storage for original course PDFs,
+    # used only by the course-ingestion CLI for provenance / "view original"
+    # links. If unset, ingestion still works — it just skips the upload and
+    # leaves curated_lecture_sources.original_pdf_path null.
+    r2_account_id: str | None = Field(default=None, alias="R2_ACCOUNT_ID")
+    r2_access_key_id: str | None = Field(default=None, alias="R2_ACCESS_KEY_ID")
+    r2_secret_access_key: str | None = Field(default=None, alias="R2_SECRET_ACCESS_KEY")
+    r2_bucket_name: str | None = Field(default=None, alias="R2_BUCKET_NAME")
+    r2_public_base_url: str | None = Field(default=None, alias="R2_PUBLIC_BASE_URL")
 
 
 settings = Settings()

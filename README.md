@@ -5,6 +5,8 @@ Gamified, AI-native learning platform. v1 launches with three subjects (history,
 Design docs:
 - [Technical architecture](./QuestLogic_Architecture.md)
 - [Database schema](./QuestLogic_DB_Schema.md)
+- [As-built architecture](./QuestLogic_AsBuilt_Architecture.md) — what's actually running, vs. the target-state docs above
+- [Curated subjects design](./QuestLogic_Curated_Subjects_Design.md) — fixed, source-grounded courses (lecture PDFs, guided pedagogy)
 
 ## Repo layout
 
@@ -67,7 +69,7 @@ This is a one-time setup; the symlink survives across pulls.
 pnpm migrate
 ```
 
-This applies `packages/db/migrations/0001_init.sql` (the v1 schema) and `0002_seed.sql` (subjects + starter achievements).
+This applies every file in `packages/db/migrations/` in order: `0001_init.sql` (the v1 schema), `0002_seed.sql` (subjects + starter achievements), `0003_session_sharing.sql`, and `0004_curated_courses.sql` (curated-course tables — see the design doc above).
 
 ### 5. Set up the AI service
 
@@ -105,7 +107,8 @@ This is the vertical-slice MVP — proves the full stack works end-to-end:
 - Skill-tree view (list-based for v0; React Flow DAG view is a follow-up)
 - Tutor chat per node, streaming responses, persisted to `messages`
 - Free-tier token budget enforcement (rough; canonical count lives in `llm_calls` written by the AI service)
-- LLM call telemetry to `llm_calls` (if `DATABASE_URL` is reachable from the AI service)
+- LLM call telemetry to `llm_calls` (if `DATABASE_URL` is reachable from the AI service), including prompt-cache read/write token accounting
+- Curated courses: fixed skill trees built from real lecture PDFs, taught in "guided" mode (grounded in the transcript, explain-then-check) instead of Socratic free-generation. Browse at `/curated`. Ingest a course directory with `uv run ingest-course <dir>` from `apps/ai` (supports `week-01/lecture-1.pdf` or a flat `Lec<week>.<lecture>.pdf` naming), review, then `uv run publish-course <slug>` to make it live.
 
 ## What's not in v0 — by design
 

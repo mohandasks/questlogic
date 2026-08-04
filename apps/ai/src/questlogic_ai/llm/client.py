@@ -10,13 +10,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import AsyncIterator, Literal
+from typing import AsyncIterator, Callable, Literal
 
 from ..settings import settings
 from . import anthropic_provider
-from .types import CompletionResult
+from .anthropic_provider import CompletionUsage
+from .types import CompletionResult, SystemBlock
 
-__all__ = ["LlmClient", "ModelTier", "CompletionRequest", "CompletionResult", "get_client"]
+__all__ = [
+    "LlmClient",
+    "ModelTier",
+    "CompletionRequest",
+    "CompletionResult",
+    "SystemBlock",
+    "CompletionUsage",
+    "get_client",
+]
 
 
 class ModelTier(str, Enum):
@@ -28,7 +37,10 @@ class ModelTier(str, Enum):
 
 @dataclass
 class CompletionRequest:
-    system: str
+    # A plain string for the common case; a list of SystemBlocks when part of
+    # the prompt (e.g. a lecture transcript) should be cached across calls —
+    # see SystemBlock in llm/types.py.
+    system: str | list[SystemBlock]
     messages: list[dict[str, str]]
     tier: ModelTier
     max_tokens: int = 1024
@@ -55,7 +67,12 @@ class LlmClient:
             response_format=req.response_format,
         )
 
-    async def stream(self, req: CompletionRequest) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        req: CompletionRequest,
+        *,
+        on_usage: Callable[[CompletionUsage], None] | None = None,
+    ) -> AsyncIterator[str]:
         model = self._resolve_model(req.tier)
         async for chunk in anthropic_provider.stream(
             model=model,
@@ -63,6 +80,7 @@ class LlmClient:
             messages=req.messages,
             max_tokens=req.max_tokens,
             temperature=req.temperature,
+            on_usage=on_usage,
         ):
             yield chunk
 

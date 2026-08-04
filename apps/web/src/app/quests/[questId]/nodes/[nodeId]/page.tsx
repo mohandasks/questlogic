@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ensureAppUser } from "@/lib/user";
 import { getAdminSupabase } from "@/utils/supabase/admin";
+import { markNodeMastered, findOrCreateNodeSession } from "@/lib/node-actions";
 import { ChatWindow } from "@/components/chat-window";
 import { SubmitButton } from "@/components/submit-button";
 import { ShareChatButton } from "@/components/share-chat-button";
@@ -18,90 +19,7 @@ async function markMasteredAction(formData: FormData): Promise<never> {
   const nodeId = String(formData.get("node_id") ?? "");
   if (!questId || !nodeId) throw new Error("Missing quest_id or node_id");
 
-  const sb = getAdminSupabase();
-
-  // 1. Confirm ownership + flip status. Only act if not already mastered, so
-  //    re-clicks are no-ops at the data layer too.
-  const { data: progress, error: pErr } = await sb
-    .from("node_progress")
-    .update({
-      status: "mastered",
-      mastered_at: new Date().toISOString(),
-    })
-    .eq("quest_id", questId)
-    .eq("template_node_id", nodeId)
-    .eq("user_id", appUserId)
-    .neq("status", "mastered")
-    .select("id")
-    .maybeSingle();
-  if (pErr) throw new Error(`Mark mastered: ${pErr.message}`);
-
-  if (progress) {
-    // 2. Award XP. Idempotency key gates repeated awards if the action runs twice.
-    await sb.from("xp_events").upsert(
-      {
-        user_id: appUserId,
-        amount: NODE_MASTERY_XP,
-        source_type: "node_mastered",
-        source_id: nodeId,
-        idempotency_key: `node_mastered:${appUserId}:${progress.id}`,
-      },
-      { onConflict: "idempotency_key", ignoreDuplicates: true },
-    );
-
-    // 3. Recompute cached total_xp + level from the canonical xp_events ledger.
-    const { data: events } = await sb
-      .from("xp_events")
-      .select("amount")
-      .eq("user_id", appUserId);
-    const totalXp = (events ?? []).reduce(
-      (n, e) => n + (e.amount as number),
-      0,
-    );
-    const level = Math.floor(Math.sqrt(totalXp / 100)) + 1;
-    await sb
-      .from("student_profiles")
-      .update({ total_xp: totalXp, current_level: level })
-      .eq("user_id", appUserId);
-
-    // 4. Unlock downstream nodes whose prereqs are all now mastered.
-    const { data: downstream } = await sb
-      .from("template_edges")
-      .select("to_node_id")
-      .eq("from_node_id", nodeId);
-
-    for (const edge of downstream ?? []) {
-      const downstreamNodeId = edge.to_node_id;
-
-      const { data: prereqEdges } = await sb
-        .from("template_edges")
-        .select("from_node_id")
-        .eq("to_node_id", downstreamNodeId);
-      const prereqIds = (prereqEdges ?? []).map((e) => e.from_node_id);
-
-      const { data: prereqProgress } = await sb
-        .from("node_progress")
-        .select("status")
-        .eq("quest_id", questId)
-        .eq("user_id", appUserId)
-        .in("template_node_id", prereqIds);
-
-      const allMastered =
-        prereqIds.length > 0 &&
-        (prereqProgress ?? []).length === prereqIds.length &&
-        (prereqProgress ?? []).every((p) => p.status === "mastered");
-
-      if (allMastered) {
-        await sb
-          .from("node_progress")
-          .update({ status: "available" })
-          .eq("quest_id", questId)
-          .eq("template_node_id", downstreamNodeId)
-          .eq("user_id", appUserId)
-          .eq("status", "locked");
-      }
-    }
-  }
+  await markNodeMastered({ appUserId, questId, nodeId });
 
   redirect(`/quests/${questId}`);
 }
@@ -151,43 +69,12 @@ export default async function NodePage({
   }
 
   // Find or create an active session for this (user, quest, node).
-  let sessionId: string;
-  let shareSlug: string | null = null;
-  const { data: existing } = await sb
-    .from("sessions")
-    .select("id, share_slug")
-    .eq("user_id", appUserId)
-    .eq("quest_id", quest.id)
-    .eq("current_node_id", node.id)
-    .is("ended_at", null)
-    .is("deleted_at", null)
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (existing) {
-    sessionId = existing.id;
-    shareSlug = existing.share_slug;
-  } else {
-    const { data: created, error: cErr } = await sb
-      .from("sessions")
-      .insert({
-        user_id: appUserId,
-        quest_id: quest.id,
-        current_node_id: node.id,
-      })
-      .select("id")
-      .single();
-    if (cErr || !created) throw new Error(`Session create: ${cErr?.message}`);
-    sessionId = created.id;
-
-    if (progress?.status === "available") {
-      await sb
-        .from("node_progress")
-        .update({ status: "in_progress", started_at: new Date().toISOString() })
-        .eq("quest_id", quest.id)
-        .eq("template_node_id", node.id);
-    }
-  }
+  const { sessionId, shareSlug } = await findOrCreateNodeSession({
+    appUserId,
+    questId: quest.id,
+    nodeId: node.id,
+    currentStatus: progress?.status,
+  });
 
   const { data: messages } = await sb
     .from("messages")

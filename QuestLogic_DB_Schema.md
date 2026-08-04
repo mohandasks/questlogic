@@ -666,3 +666,13 @@ By the time you're at the assessment milestone, these will need answers:
 3. **Leaderboard period boundaries.** UTC week or user-local week? UTC is simpler; user-local is fairer. Pick before launch.
 4. **Hard cap on free-tier carryover.** Do unused tokens roll over, or vanish on the 1st? (Recommend: vanish — encourages activity.)
 5. **PII in `messages.content`.** Adult users will paste their resumes, essays, etc. Encrypt at rest beyond Supabase default? Token-redact for telemetry? Decide before institutional sales.
+
+---
+
+## 18. Addendum: curated courses (migration 0004)
+
+`curriculum_templates` gained `source_type` ('generated' | 'curated'), `pedagogy_style` ('socratic' | 'guided'), `course_metadata` (jsonb), and a nullable unique `slug` for curated courses' URLs. `depth` is nullable now — a fixed course doesn't have an intro/intermediate/advanced tier. Curated templates use a shared `subjects` row (`slug = 'curated'`) rather than the history/economics/philosophy set, so `subject_id NOT NULL` stays true everywhere without exceptions.
+
+New tables, 1:1 or 1:many off `template_nodes` (a curated course's "node" is one lecture): `curated_lecture_sources` (extracted transcript + checksum + review state), `curated_assignments` + `curated_assignment_completions` (self-reported, not auto-graded — no grading pipeline exists yet), and `curated_lecture_chunks` (modeled for future chunked retrieval, unused until a lecture is too long to inject in full — see the design doc).
+
+Full rationale: `QuestLogic_Curated_Subjects_Design.md`.

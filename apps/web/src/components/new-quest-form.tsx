@@ -2,9 +2,14 @@
 
 import { useMemo, useState } from "react";
 import { SubmitButton } from "@/components/submit-button";
-import type { SubjectSlug, CurriculumDepth } from "@questlogic/shared";
+import type { CurriculumDepth } from "@questlogic/shared";
 
-const POPULAR_TOPICS: Record<SubjectSlug, string[]> = {
+// Only the subjects this form ever generates a quest for. Deliberately not
+// the full shared SubjectSlug — "curated" courses are fixed content started
+// from /curated, never from this freeform-generation form.
+type GeneratableSubject = "history" | "economics" | "philosophy";
+
+const POPULAR_TOPICS: Record<GeneratableSubject, string[]> = {
   history: [
     "The fall of the Roman Republic",
     "Causes of World War I",
@@ -42,7 +47,7 @@ export function NewQuestForm({
 }: {
   action: (formData: FormData) => Promise<never>;
 }) {
-  const [subject, setSubject] = useState<SubjectSlug>("history");
+  const [subject, setSubject] = useState<GeneratableSubject>("history");
   const [topic, setTopic] = useState("");
 
   const examples = useMemo(() => POPULAR_TOPICS[subject], [subject]);
@@ -55,7 +60,7 @@ export function NewQuestForm({
           name="subject"
           required
           value={subject}
-          onChange={(e) => setSubject(e.target.value as SubjectSlug)}
+          onChange={(e) => setSubject(e.target.value as GeneratableSubject)}
           className="mt-1 w-full rounded-lg border border-border bg-panel p-3"
         >
           <option value="history">History</option>
